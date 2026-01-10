@@ -59,19 +59,18 @@ jobs:
         with:
           go-version: ^1.25.2
 
-      # 1️⃣ Clone 私有仓库
+      # Clone 私有仓库
       - name: Clone private repo
-        run: |
-          git clone https://${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/${{ secrets.PRIVATE_REPO }} private-repo
+        run: git clone https://${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/${{ secrets.PRIVATE_REPO }} private-repo
 
-      # 2️⃣ 安装 GoReleaser CLI
+      # 安装 GoReleaser CLI
       - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
           install: true
 
-      # 3️⃣ Build Test
+      # Build snapshot
       - name: Build Test
         if: github.event_name != 'push' || !contains(github.ref, 'refs/tags/')
         env:
@@ -82,7 +81,7 @@ jobs:
           cd private-repo
           goreleaser build --single-target --clean --skip=validate --snapshot
 
-      # 4️⃣ Build Release
+      # Build release
       - name: Build
         if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
         env:
@@ -93,7 +92,7 @@ jobs:
           cd private-repo
           goreleaser build --single-target --clean --skip=validate
 
-      # 5️⃣ Archive
+      # Archive zip
       - name: Archive
         env:
           GOOS: ${{ matrix.goos }}
@@ -102,11 +101,8 @@ jobs:
           cd private-repo
           zip -jr dist/nezha-agent_${GOOS}_${GOARCH}.zip dist/*/*
 
-      # 6️⃣ Upload artifacts
+      # Upload artifacts (✅ 修复冲突)
       - name: Upload artifacts
-        run: |
-          cd private-repo
-          ls dist
         uses: actions/upload-artifact@v4
         with:
           name: nezha-agent_${{ matrix.goos }}_${{ matrix.goarch }}
