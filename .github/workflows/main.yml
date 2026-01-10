@@ -38,25 +38,41 @@ jobs:
         run: |
           git clone https://${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/${{ secrets.PRIVATE_REPO }} private-repo
 
-      # 4️⃣ Build snapshot 或 release
+      # 4️⃣ 安装 GoReleaser CLI
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          install: true
+
+      # 5️⃣ 构建 (snapshot 或 release)
       - name: Build with GoReleaser
         run: |
           cd private-repo
           if [[ "${GITHUB_EVENT_NAME}" != "push" || "${GITHUB_REF}" != refs/tags/* ]]; then
+            echo "Snapshot build"
             goreleaser release --snapshot --skip-publish --clean
           else
+            echo "Official release build"
             goreleaser release --clean
           fi
+        shell: bash
 
-      # 5️⃣ 上传 artifacts
+      # 6️⃣ 生成 checksums
+      - name: Generate Checksums
+        run: |
+          cd private-repo/dist
+          sha256sum *.zip > checksums.txt
+
+      # 7️⃣ 上传 artifacts
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: nezha-agent
           path: |
-            ./private-repo/dist/*.tar.gz
             ./private-repo/dist/*.zip
             ./private-repo/dist/*.sha256sum
+            ./private-repo/dist/checksums.txt
 
   release:
     runs-on: ubuntu-latest
@@ -69,11 +85,11 @@ jobs:
         with:
           path: ./assets
 
-      - name: Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             assets/*/*.zip
-            assets/*/*.tar.gz
             assets/*/*.sha256sum
+            assets/*/checksums.txt
           generate_release_notes: true
