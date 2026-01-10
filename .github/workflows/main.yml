@@ -38,14 +38,14 @@ jobs:
         run: |
           git clone https://${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/${{ secrets.PRIVATE_REPO }} private-repo
 
-      # 4️⃣ 安装 GoReleaser CLI
+      # 4️⃣ 安装 GoReleaser CLI（v2）
       - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
-          version: latest
-          install: true
+          version: "~> v2"
+          install: true  # ✅ 只安装 CLI，不执行
 
-      # 5️⃣ 构建 (snapshot 或 release)
+      # 5️⃣ 构建 snapshot 或 release
       - name: Build with GoReleaser
         run: |
           cd private-repo
@@ -58,7 +58,7 @@ jobs:
           fi
         shell: bash
 
-      # 6️⃣ 生成 checksums
+      # 6️⃣ 生成 checksums.txt
       - name: Generate Checksums
         run: |
           cd private-repo/dist
