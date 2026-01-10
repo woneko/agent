@@ -1,4 +1,4 @@
-name: Build + Release Private Repo
+name: Build & Release Private Repo
 
 on:
   workflow_dispatch:
@@ -10,18 +10,42 @@ on:
 
 jobs:
   build:
+    name: Build Multi-Platform
     runs-on: ubuntu-latest
-    name: Build Private Repo
+    strategy:
+      fail-fast: true
+      matrix:
+        goos: [linux, windows, darwin, freebsd]
+        goarch: [amd64, arm64, 386]
+        include:
+          - goos: linux
+            goarch: 386
+          - goos: linux
+            goarch: s390x
+          - goos: linux
+            goarch: riscv64
+          - goos: linux
+            goarch: arm
+          - goos: linux
+            goarch: mips
+            gomips: softfloat
+          - goos: linux
+            goarch: mipsle
+            gomips: softfloat
+      exclude:
+        - goos: darwin
+          goarch: 386
+
     steps:
-      # 1️⃣ Checkout 当前公开仓库
+      # 1️⃣ Checkout 当前公开仓库（必需步骤）
       - uses: actions/checkout@v4
 
-      # 2️⃣ 拉取私有仓库
+      # 2️⃣ Checkout 私有仓库
       - name: Checkout private repository
         uses: actions/checkout@v4
         with:
           repository: your-private-username/nezha-agent
-          token: ${{ secrets.PRIVATE_REPO_PAT }}  # Personal Access Token
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: private-repo
 
       # 3️⃣ 设置 Go
@@ -30,39 +54,45 @@ jobs:
         with:
           go-version: ^1.25.2
 
-      # 4️⃣ Go modules tidy
+      # 4️⃣ Go mod tidy
       - name: Go mod tidy
         working-directory: private-repo
         run: go mod tidy -v
 
-      # 5️⃣ Build with GoReleaser
+      # 5️⃣ Build using GoReleaser
       - name: Build with GoReleaser
-        working-directory: private-repo
         uses: goreleaser/goreleaser-action@v6
+        working-directory: private-repo
         env:
-          GOOS: linux
-          GOARCH: amd64
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOMIPS: ${{ matrix.gomips }}
         with:
           distribution: goreleaser
           version: "~> v2"
           args: build --single-target --clean --skip=validate --snapshot
 
-      # 6️⃣ Zip multi-platform binaries
+      # 6️⃣ Archive each binary
       - name: Archive binaries
         working-directory: private-repo
         run: |
-          for dir in dist/*/; do
-            zip -j "dist/$(basename $dir).zip" "$dir"/*
-          done
+          BIN_DIR="dist/nezha-agent_${GOOS}_${GOARCH}"
+          BIN_NAME="nezha-agent"
+          if [ "$GOOS" = "windows" ]; then
+            BIN_NAME="nezha-agent.exe"
+          fi
+          mkdir -p archives
+          zip -j "archives/nezha-agent_${GOOS}_${GOARCH}.zip" "$BIN_DIR/$BIN_NAME"
 
       # 7️⃣ Upload artifacts
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: nezha-agent
-          path: private-repo/dist/*.zip
+          name: nezha-agent_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: private-repo/archives/*.zip
 
   release:
+    name: Create Release
     runs-on: ubuntu-latest
     needs: build
     steps:
@@ -72,14 +102,14 @@ jobs:
         with:
           path: ./release_files
 
-      # 2️⃣ 创建 checksums
+      # 2️⃣ 创建 SHA256 校验
       - name: Create checksums
         run: |
           cd release_files
           sha256sum *.zip > checksums.txt
 
       # 3️⃣ 创建或更新 Release
-      - name: Create or Update Release
+      - name: Create or Update GitHub Release
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.event.inputs.version }}
