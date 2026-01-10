@@ -1,4 +1,4 @@
-name: Build & Release Nezha Agent
+name: Build + Release
 
 on:
   workflow_dispatch:
@@ -6,103 +6,79 @@ on:
       version:
         description: '版本号，例如 v1.14.4'
         required: true
-        default: 'v1.0.0'
+        default: 'v0.0.1'
 
 jobs:
-  build:
-    name: Build Multi-Platform
+  tag-and-build:
+    name: Tag, Build and Release
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: linux
-            goarch: 386
-          - goos: linux
-            goarch: mips
-            gomips: softfloat
-          - goos: windows
-            goarch: amd64
-          - goos: darwin
-            goarch: amd64
-
     steps:
-      # 1️⃣ Checkout 私有仓库
-      - name: Checkout private repository
+      # 设置 Git 用户
+      - name: Set Git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      # 创建 tag
+      - name: Create tag
+        run: |
+          TAG=${{ github.event.inputs.version }}
+          echo "Creating tag $TAG"
+          git tag -a $TAG -m "Release $TAG"
+          git push origin $TAG
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 拉取私有仓库源码
+      - name: Checkout private repo
         uses: actions/checkout@v4
         with:
-          repository: your-private-username/nezha-agent
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
-          path: private-repo
+          repository: ${{ secrets.PRIVATE_REPO }}
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          fetch-depth: 0
+          path: nezha-agent
 
-      # 2️⃣ 设置 Go
+      # 设置 Go
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ^1.25.2
 
-      # 3️⃣ Go mod tidy
-      - name: Go mod tidy
-        working-directory: private-repo
-        run: go mod tidy -v
-
-      # 4️⃣ Build with GoReleaser
-      - name: Build using GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        working-directory: private-repo
+      # 构建 snapshot / release
+      - name: Build with GoReleaser
+        run: |
+          cd nezha-agent
+          TAG=${{ github.event.inputs.version }}
+          if [[ "$TAG" == "" ]]; then
+            goreleaser build --single-target --clean --skip=validate --snapshot
+          else
+            goreleaser build --single-target --clean --skip=validate
+          fi
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           GOMIPS: ${{ matrix.gomips }}
-        with:
-          distribution: goreleaser
-          version: "~> v2"
-          args: build --single-target --clean --skip=validate --snapshot
 
-      # 5️⃣ Archive binary
+      # 打包 zip
       - name: Archive binary
-        working-directory: private-repo
         run: |
-          BIN_DIR="dist/nezha-agent_${GOOS}_${GOARCH}"
+          cd nezha-agent/dist
           BIN_NAME="nezha-agent"
-          if [ "$GOOS" = "windows" ]; then
-            BIN_NAME="nezha-agent.exe"
-          fi
-          mkdir -p archives
-          zip -j "archives/nezha-agent_${GOOS}_${GOARCH}.zip" "$BIN_DIR/$BIN_NAME"
+          [[ "$GOOS" == "windows" ]] && BIN_NAME="nezha-agent.exe"
+          zip -j "nezha-agent_${GOOS}_${GOARCH}.zip" "$BIN_NAME"
 
-      # 6️⃣ Upload artifacts
-      - name: Upload artifacts
+      # 上传 artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: nezha-agent_${{ matrix.goos }}_${{ matrix.goarch }}
-          path: private-repo/archives/*.zip
+          path: nezha-agent/dist/nezha-agent_${{ matrix.goos }}_${{ matrix.goarch }}.zip
 
-  release:
-    name: Create Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      # 下载所有 artifacts
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      # 创建 GitHub Release
+      - name: Create Release
+        uses: ncipollo/release-action@v1
         with:
-          path: release_files
-
-      # 生成 SHA256 校验文件
-      - name: Create checksums
-        run: |
-          cd release_files
-          sha256sum *.zip > checksums.txt
-
-      # 创建或更新 Release
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.event.inputs.version }}
-          name: ${{ github.event.inputs.version }}
-          files: ./release_files/*
+          tag: ${{ github.event.inputs.version }}
+          artifacts: "nezha-agent/dist/*.zip"
+          generateReleaseNotes: true
+          allowUpdates: true
