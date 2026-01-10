@@ -1,84 +1,81 @@
-name: Build + Release
+name: Build & Release Nezha Agent
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号，例如 v1.14.4'
+        description: 'Release version (e.g., v1.14.4)'
         required: true
-        default: 'v0.0.1'
+
+permissions:
+  contents: write  # 允许创建 tag 和 release
 
 jobs:
-  tag-and-build:
-    name: Tag, Build and Release
+  release:
     runs-on: ubuntu-latest
+    env:
+      PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
+      PRIVATE_REPO_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      VERSION: ${{ github.event.inputs.version }}
     steps:
-      # 设置 Git 用户
-      - name: Set Git identity
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+      # ------------------ Checkout this org repo ------------------
+      - name: Checkout org repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 必须，否则无法创建 tag
 
-      # 创建 tag
-      - name: Create tag
+      # ------------------ Create git tag ------------------
+      - name: Create Git Tag
         run: |
-          TAG=${{ github.event.inputs.version }}
-          echo "Creating tag $TAG"
-          git tag -a $TAG -m "Release $TAG"
-          git push origin $TAG
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git tag -a $VERSION -m "Release $VERSION"
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
+          git push origin $VERSION
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 拉取私有仓库源码
+      # ------------------ Checkout private repo ------------------
       - name: Checkout private repo
         uses: actions/checkout@v4
         with:
-          repository: ${{ secrets.PRIVATE_REPO }}
-          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
-          fetch-depth: 0
+          repository: ${{ env.PRIVATE_REPO }}
+          token: ${{ env.PRIVATE_REPO_TOKEN }}
           path: nezha-agent
 
-      # 设置 Go
+      # ------------------ Set up Go ------------------
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ^1.25.2
 
-      # 构建 snapshot / release
-      - name: Build with GoReleaser
-        run: |
-          cd nezha-agent
-          TAG=${{ github.event.inputs.version }}
-          if [[ "$TAG" == "" ]]; then
-            goreleaser build --single-target --clean --skip=validate --snapshot
-          else
-            goreleaser build --single-target --clean --skip=validate
-          fi
+      # ------------------ Build with GoReleaser ------------------
+      - name: Build Nezha Agent
+        working-directory: nezha-agent
+        uses: goreleaser/goreleaser-action@v6
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          GOMIPS: ${{ matrix.gomips }}
-
-      # 打包 zip
-      - name: Archive binary
-        run: |
-          cd nezha-agent/dist
-          BIN_NAME="nezha-agent"
-          [[ "$GOOS" == "windows" ]] && BIN_NAME="nezha-agent.exe"
-          zip -j "nezha-agent_${GOOS}_${GOARCH}.zip" "$BIN_NAME"
-
-      # 上传 artifact
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+          GOOS: linux
+          GOARCH: amd64
         with:
-          name: nezha-agent_${{ matrix.goos }}_${{ matrix.goarch }}
-          path: nezha-agent/dist/nezha-agent_${{ matrix.goos }}_${{ matrix.goarch }}.zip
+          distribution: goreleaser
+          version: "~> v2"
+          args: build --single-target --clean --skip=validate --snapshot
 
-      # 创建 GitHub Release
+      # ------------------ Zip artifacts ------------------
+      - name: Archive binary
+        working-directory: nezha-agent
+        run: |
+          mkdir -p dist
+          BIN_NAME="nezha-agent"
+          [ -f "dist/$BIN_NAME" ] || echo "Binary not found!"
+          zip -j "dist/nezha-agent_${VERSION}.zip" dist/$BIN_NAME
+
+      # ------------------ Upload Release ------------------
       - name: Create Release
         uses: ncipollo/release-action@v1
         with:
-          tag: ${{ github.event.inputs.version }}
-          artifacts: "nezha-agent/dist/*.zip"
+          tag_name: ${{ env.VERSION }}
+          name: ${{ env.VERSION }}
+          artifacts: nezha-agent/dist/*
           generateReleaseNotes: true
           allowUpdates: true
