@@ -6,13 +6,6 @@ on:
       - "v*"
     branches:
       - main
-    paths-ignore:
-      - ".github/workflows/agent.yml"
-      - ".github/workflows/codeql-analysis.yml"
-      - ".github/workflows/test.yml"
-      - ".github/workflows/contributors.yml"
-      - "README.md"
-      - ".goreleaser.yml"
   pull_request:
     branches:
       - main
@@ -25,76 +18,46 @@ jobs:
       matrix:
         goos: [linux, windows, darwin, freebsd]
         goarch: [amd64, arm64, 386]
-        include:
-          - goos: linux
-            goarch: 386
-          - goos: linux
-            goarch: s390x
-          - goos: linux
-            goarch: riscv64
-          - goos: linux
-            goarch: arm
-          - goos: linux
-            goarch: mips
-            gomips: softfloat
-          - goos: linux
-            goarch: mipsle
-            gomips: softfloat
-          - goos: linux
-            goarch: loong64
-          - goos: freebsd
-            goarch: arm
-        exclude:
-          - goos: darwin
-            goarch: 386
 
-    name: Build artifacts
     steps:
-      # 1️⃣ 拉取主仓库（可选，如果只是为了 workflow 文件）
+      # 1️⃣ 拉取主仓库（可选）
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2️⃣ 拉取私有仓库
-      - name: Checkout private repo
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ secrets.PRIVATE_REPO }}
-          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
-          path: private-repo
-
-      # 3️⃣ 设置 Go
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      # 2️⃣ 安装 Go
+      - uses: actions/setup-go@v5
         with:
           go-version: ^1.25.2
 
-      # 4️⃣ 构建（测试或正式）
-      - name: Build with GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          GOMIPS: ${{ matrix.gomips }}
-        with:
-          distribution: goreleaser
-          version: "~> v2"
-          args: |
-            build --single-target --clean --skip=validate
-            ${{ github.event_name != 'push' || !contains(github.ref, 'refs/tags/') && '--snapshot' || '' }}
-        working-directory: ./private-repo
+      # 3️⃣ clone 私有仓库并 cd
+      - name: Clone private repo
+        run: |
+          git clone https://${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/${{ secrets.PRIVATE_REPO }} private-repo
+          cd private-repo
+          echo "Private repo cloned and inside directory"
 
-      # 5️⃣ 压缩产物
-      - name: Archive artifacts
-        run: zip -jr dist/nezha-agent_${{ matrix.goos }}_${{ matrix.goarch }}.zip dist/*/*
-        working-directory: ./private-repo
+      # 4️⃣ 构建
+      - name: Build snapshot or release
+        run: |
+          cd private-repo
+          if [[ "${GITHUB_EVENT_NAME}" != "push" || "${GITHUB_REF}" != refs/tags/* ]]; then
+            goreleaser build --single-target --clean --skip=validate --snapshot
+          else
+            goreleaser build --single-target --clean --skip=validate
+          fi
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+
+      # 5️⃣ 压缩
+      - name: Archive
+        run: |
+          cd private-repo
+          zip -jr dist/nezha-agent_${GOOS}_${GOARCH}.zip dist/*/*
 
       # 6️⃣ 上传 artifacts
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: nezha-agent_${{ matrix.goos }}_${{ matrix.goarch }}
           path: ./private-repo/dist/nezha-agent_${{ matrix.goos }}_${{ matrix.goarch }}.zip
@@ -103,10 +66,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
-    name: Release
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: ./assets
 
