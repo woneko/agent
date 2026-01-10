@@ -19,60 +19,98 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        goos: [linux, windows, darwin, freebsd]
+        goarch: [amd64, arm64, 386]
+        include:
+          - goos: linux
+            goarch: 386
+          - goos: linux
+            goarch: s390x
+          - goos: linux
+            goarch: riscv64
+          - goos: linux
+            goarch: arm
+          - goos: linux
+            goarch: mips
+            gomips: softfloat
+          - goos: linux
+            goarch: mipsle
+            gomips: softfloat
+          - goos: linux
+            goarch: loong64
+          - goos: freebsd
+            goarch: arm
+        exclude:
+          - goos: darwin
+            goarch: 386
+
     name: Build artifacts
+    runs-on: ubuntu-latest
     steps:
-      # 1️⃣ 拉取主仓库（可选）
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2️⃣ 设置 Go
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ^1.25.2
 
-      # 3️⃣ Clone 私有仓库
+      # 1️⃣ Clone 私有仓库
       - name: Clone private repo
         run: |
           git clone https://${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/${{ secrets.PRIVATE_REPO }} private-repo
 
-      # 4️⃣ 安装 GoReleaser CLI（v2）
+      # 2️⃣ 安装 GoReleaser CLI
       - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          install: true  # ✅ 只安装 CLI，不执行
+          install: true
 
-      # 5️⃣ 构建 snapshot 或 release
-      - name: Build with GoReleaser
+      # 3️⃣ Build Test
+      - name: Build Test
+        if: github.event_name != 'push' || !contains(github.ref, 'refs/tags/')
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOMIPS: ${{ matrix.gomips }}
         run: |
           cd private-repo
-          if [[ "${GITHUB_EVENT_NAME}" != "push" || "${GITHUB_REF}" != refs/tags/* ]]; then
-            echo "Snapshot build"
-            goreleaser release --snapshot --skip-publish --clean
-          else
-            echo "Official release build"
-            goreleaser release --clean
-          fi
-        shell: bash
+          goreleaser build --single-target --clean --skip=validate --snapshot
 
-      # 6️⃣ 生成 checksums.txt
-      - name: Generate Checksums
+      # 4️⃣ Build Release
+      - name: Build
+        if: github.event_name == 'push' && contains(github.ref, 'refs/tags/')
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOMIPS: ${{ matrix.gomips }}
         run: |
-          cd private-repo/dist
-          sha256sum *.zip > checksums.txt
+          cd private-repo
+          goreleaser build --single-target --clean --skip=validate
 
-      # 7️⃣ 上传 artifacts
+      # 5️⃣ Archive
+      - name: Archive
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          cd private-repo
+          zip -jr dist/nezha-agent_${GOOS}_${GOARCH}.zip dist/*/*
+
+      # 6️⃣ Upload artifacts
       - name: Upload artifacts
+        run: |
+          cd private-repo
+          ls dist
         uses: actions/upload-artifact@v4
         with:
-          name: nezha-agent
-          path: |
-            ./private-repo/dist/*.zip
-            ./private-repo/dist/*.sha256sum
-            ./private-repo/dist/checksums.txt
+          name: nezha-agent_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: ./private-repo/dist/nezha-agent_${{ matrix.goos }}_${{ matrix.goarch }}.zip
 
   release:
     runs-on: ubuntu-latest
@@ -85,11 +123,13 @@ jobs:
         with:
           path: ./assets
 
-      - name: Create GitHub Release
+      - name: Checksum
+        run: sha256sum ./assets/*/*.zip | awk -F" |/" '{print $1, $NF}' > checksums.txt
+
+      - name: Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            checksums.txt
             assets/*/*.zip
-            assets/*/*.sha256sum
-            assets/*/checksums.txt
           generate_release_notes: true
