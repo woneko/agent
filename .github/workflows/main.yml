@@ -54,7 +54,7 @@ jobs:
         run: |
           rm -rf ./*
           git clone --branch main --single-branch \
-            https://${{ secrets.PRIVATE_REPO_TOKEN }}@${{ secrets.PRIVATE_REPO_URL }} .
+            https://${{ secrets.PRIVATE_REPO_TOKEN }}@${{ secrets.PRIVATE_REPO }} .
 
       - name: Set up Go
         uses: actions/setup-go@v5
