@@ -4,18 +4,11 @@ on:
   push:
     tags:
       - "v*"
-    branches:
-      - main
     paths-ignore:
-      - ".github/workflows/agent.yml"
-      - ".github/workflows/codeql-analysis.yml"
-      - ".github/workflows/test.yml"
-      - ".github/workflows/contributors.yml"
+      - ".github/workflows/main.yml"
+      - ".github/workflows/sync-release.yml"
+      - ".github/workflows/sync.py"
       - "README.md"
-      - ".goreleaser.yml"
-  pull_request:
-    branches:
-      - main
 
 jobs:
   build:
