@@ -115,6 +115,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.MY_GH_PAT }}
 
+      - name: Purge jsdelivr cache
+        run: |
+          curl -s https://purge.jsdelivr.net/gh/woneko/agent@main/scripts/install.sh
+          curl -s https://purge.jsdelivr.net/gh/woneko/agent@main/scripts/install.ps1
+
       - name: Trigger sync
         env:
           GH_REPO: ${{ github.repository }}
