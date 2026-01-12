@@ -119,3 +119,5 @@ jobs:
             checksums.txt
             assets/*/*.zip
           generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.MY_GH_PAT }}
