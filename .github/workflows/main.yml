@@ -1,14 +1,8 @@
 name: Build + Release
 
 on:
-  push:
-    tags:
-      - "v*"
-    paths-ignore:
-      - ".github/workflows/main.yml"
-      - ".github/workflows/sync-release.yml"
-      - ".github/workflows/sync.py"
-      - "README.md"
+  repository_dispatch:
+    types: [build-release]
 
 jobs:
   build:
@@ -43,11 +37,12 @@ jobs:
     name: Build artifacts
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout private repo (PAT, main)
-        run: |
-          rm -rf ./*
-          git clone --branch main2 --single-branch \
-            https://${{ secrets.PRIVATE_REPO_TOKEN }}@${{ secrets.PRIVATE_REPO }} .
+      - uses: actions/checkout@v3
+        with:
+          repository: ${{secrets.PRIVATE_REPO}}
+          ref: ${{secrets.PRIVATE_REPO_REF}}
+          token: ${{secrets.PRIVATE_REPO_TOKEN}}
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -126,7 +121,7 @@ jobs:
       - name: Trigger sync
         env:
           GH_REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.ORG_WORKFLOW }}
           GH_DEBUG: api
         run: |
           gh workflow run sync-release.yml
